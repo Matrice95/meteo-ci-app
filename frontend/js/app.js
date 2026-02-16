@@ -42,6 +42,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const toastMessageEl = document.getElementById("toastMessage");
 
     // État global
+    let selectedStationType = 'pulsonic';  // Type de station sélectionné
     let allStations = [];           // data/stations.json
     let filteredStations = [];      // après recherche/filtre
     let selectedStationIds = [];
@@ -57,6 +58,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // Initialisation générale
     initConnectionStatus();
+    initStationTypeSelection();
     initDatePickers();
     loadStationsAndInitMap();
     loadParameters();
@@ -65,6 +67,39 @@ document.addEventListener("DOMContentLoaded", () => {
     // ---------------------------
     // Fonctions d'initialisation
     // ---------------------------
+
+    function initStationTypeSelection() {
+        const stationTypeSelect = document.getElementById('stationType');
+        
+        if (stationTypeSelect) {
+            stationTypeSelect.addEventListener('change', (e) => {
+                const type = e.target.value;
+                
+                // Mettre à jour le type sélectionné
+                selectedStationType = type;
+                
+                // Recharger les stations et paramètres pour ce type
+                resetSelection();
+                loadStationsAndInitMap();
+                loadParameters();
+                
+                showToast(`Type de station "${type}" sélectionné`, "success");
+            });
+        }
+    }
+
+    function resetSelection() {
+        selectedStationIds = [];
+        selectedParams = [];
+        availabilityData = {};
+        lastEstimate = null;
+        
+        // Cacher les sections suivantes
+        if (availabilitySection) availabilitySection.style.display = "none";
+        if (periodSection) periodSection.style.display = "none";
+        if (parametersSection) parametersSection.style.display = "none";
+        if (downloadSection) downloadSection.style.display = "none";
+    }
 
     function initConnectionStatus() {
         setConnectionStatus("pending", "Connexion au WebService...");
@@ -115,7 +150,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     function loadStationsAndInitMap() {
-        ApiClient.getStations()
+        ApiClient.getStations(selectedStationType)
             .then((res) => {
                 if (res.status !== "success") {
                     throw new Error(res.message || "Erreur chargement stations");
@@ -131,7 +166,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     function loadParameters() {
-        ApiClient.getParameters()
+        ApiClient.getParameters(selectedStationType)
             .then((res) => {
                 if (res.status !== "success") {
                     throw new Error(res.message || "Erreur chargement paramètres");
@@ -334,7 +369,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const granularity = granularitySelect.value;
         availabilityResultsEl.innerHTML = "<p>Vérification en cours...</p>";
 
-        ApiClient.getAvailability(selectedStationIds, granularity)
+        ApiClient.getAvailability(selectedStationIds, granularity, selectedStationType)
             .then((res) => {
                 if (res.status !== "success") {
                     throw new Error(res.message || "Erreur disponibilité");
@@ -431,7 +466,7 @@ document.addEventListener("DOMContentLoaded", () => {
     function requestEstimate(startDate, endDate) {
         const granularity = granularitySelect.value;
 
-        ApiClient.estimateDownload(selectedStationIds, selectedParams, startDate, endDate, granularity)
+        ApiClient.estimateDownload(selectedStationIds, selectedParams, startDate, endDate, granularity, selectedStationType)
             .then((res) => {
                 if (res.status !== "success") {
                     throw new Error(res.message || "Erreur estimation");
@@ -650,7 +685,8 @@ document.addEventListener("DOMContentLoaded", () => {
                 selectedParams,
                 start,
                 end,
-                granularity
+                granularity,
+                selectedStationType
             );
 
             showProgress(80, "Construction du fichier CSV...");

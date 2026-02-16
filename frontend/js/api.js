@@ -28,16 +28,20 @@ const ApiClient = (function () {
             return getJSON(`${API_BASE_URL}/api/health`);
         },
 
-        async getParameters() {
-            return getJSON(`${API_BASE_URL}/api/parameters`);
+        async getParameters(stationType = 'pulsonic') {
+            const url = new URL(`${API_BASE_URL}/api/parameters`);
+            url.searchParams.set('station_type', stationType);
+            return getJSON(url.toString());
         },
 
-        async getStations() {
-            return getJSON(`${API_BASE_URL}/api/stations`);
+        async getStations(stationType = 'pulsonic') {
+            const url = new URL(`${API_BASE_URL}/api/stations`);
+            url.searchParams.set('station_type', stationType);
+            return getJSON(url.toString());
         },
 
-        async getAvailability(stations, granularity) {
-            const body = { stations, granularity };
+        async getAvailability(stations, granularity, stationType = 'pulsonic') {
+            const body = { stations, granularity, station_type: stationType };
             const res = await postJSON(`${API_BASE_URL}/api/stations/availability`, body);
             if (!res.ok) {
                 const err = await res.json().catch(() => ({}));
@@ -46,8 +50,15 @@ const ApiClient = (function () {
             return res.json();
         },
 
-        async estimateDownload(stations, params, startDate, endDate, granularity) {
-            const body = { stations, params, start_date: startDate, end_date: endDate, granularity };
+        async estimateDownload(stations, params, startDate, endDate, granularity, stationType = 'pulsonic') {
+            const body = { 
+                stations, 
+                params, 
+                start_date: startDate, 
+                end_date: endDate, 
+                granularity,
+                station_type: stationType
+            };
             const res = await postJSON(`${API_BASE_URL}/api/estimate`, body);
             if (!res.ok) {
                 const err = await res.json().catch(() => ({}));
@@ -56,8 +67,15 @@ const ApiClient = (function () {
             return res.json();
         },
 
-        async downloadData(stations, params, startDate, endDate, granularity) {
-            const body = { stations, params, start_date: startDate, end_date: endDate, granularity };
+        async downloadData(stations, params, startDate, endDate, granularity, stationType = 'pulsonic') {
+            const body = { 
+                stations, 
+                params, 
+                start_date: startDate, 
+                end_date: endDate, 
+                granularity,
+                station_type: stationType
+            };
             const response = await fetch(`${API_BASE_URL}/api/download`, {
                 method: "POST",
                 headers: {

@@ -10,14 +10,13 @@ import traceback
 import io
 
 from config import Config
-from webservice import MeteoVisionClient, WebServiceError
-from utils import (
-    estimate_data_volume,
-    generate_csv_from_data,
-    split_date_range,
-    validate_date_range,
-    format_duration
-)
+from webservice import WebServiceError
+from utils import generate_csv_from_data
+
+# Import des providers
+from providers.base_provider import BaseStationProvider
+from providers.pulsonic_provider import PulsonicProvider
+from providers.campbell_provider import CampbellProvider
 
 # Configuration du logging
 logging.basicConfig(
@@ -35,35 +34,35 @@ app = Flask(__name__)
 app.config.from_object(Config)
 CORS(app, origins=Config.CORS_ORIGINS)
 
-# Instance globale du client WebService (réutilisable)
-ws_client = None
+# Registry des providers par type de station
+PROVIDERS = {
+    "pulsonic": PulsonicProvider(),
+    "campbell": CampbellProvider()
+}
 
 
-def get_ws_client():
-    """Récupère ou crée une instance du client WebService"""
-    global ws_client
+def get_provider(station_type: str) -> BaseStationProvider:
+    """
+    Récupère le provider approprié selon le type de station.
     
-    if ws_client is None or not ws_client.connected:
-        try:
-            ws_client = MeteoVisionClient(
-                Config.WSDL_URL,
-                Config.WS_LOGIN,
-                Config.WS_PASSWORD,
-                Config.WS_ID
-            )
-            ws_client.connect()
-        except WebServiceError as e:
-            logger.error(f"Tentative URL backup: {Config.WSDL_URL_BACKUP}")
-            # Essayer l'URL de backup
-            ws_client = MeteoVisionClient(
-                Config.WSDL_URL_BACKUP,
-                Config.WS_LOGIN,
-                Config.WS_PASSWORD,
-                Config.WS_ID
-            )
-            ws_client.connect()
+    Args:
+        station_type: Type de station ('pulsonic', 'campbell', etc.)
+        
+    Returns:
+        BaseStationProvider: Instance du provider
+        
+    Raises:
+        ValueError: Si le type de station est inconnu
+    """
+    if not station_type:
+        # Valeur par défaut pour compatibilité
+        station_type = "pulsonic"
     
-    return ws_client
+    provider = PROVIDERS.get(station_type.lower())
+    if not provider:
+        raise ValueError(f"Type de station inconnu: {station_type}")
+    
+    return provider
 
 
 # ============================================
@@ -74,14 +73,13 @@ def get_ws_client():
 def health_check():
     """Vérification de l'état de l'API"""
     try:
-        client = get_ws_client()
-        version = client.get_version()
+        # Test de connexion avec le provider par défaut (Pulsonic)
+        provider = get_provider("pulsonic")
         
         return jsonify({
             'status': 'ok',
             'timestamp': datetime.now().isoformat(),
-            'webservice_version': version,
-            'webservice_connected': client.connected
+            'providers': list(PROVIDERS.keys())
         })
     except Exception as e:
         logger.error(f"Health check failed: {str(e)}")
@@ -92,34 +90,77 @@ def health_check():
         }), 500
 
 
+@app.route('/api/station-types', methods=['GET'])
+def get_station_types():
+    """Retourne la liste des types de stations disponibles"""
+    try:
+        types = []
+        for station_type, provider in PROVIDERS.items():
+            types.append({
+                'id': station_type,
+                'label': station_type.capitalize(),
+                'icon': '📡' if station_type == 'pulsonic' else '🔧'
+            })
+        
+        return jsonify({
+            'status': 'success',
+            'data': types
+        })
+    except Exception as e:
+        logger.error(f"Erreur get_station_types: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+
 @app.route('/api/parameters', methods=['GET'])
 def get_parameters():
-    """Retourne la liste des paramètres disponibles organisés par catégorie"""
-    return jsonify({
-        'status': 'success',
-        'data': Config.PARAMETERS
-    })
+    """Retourne la liste des paramètres disponibles selon le type de station"""
+    try:
+        station_type = request.args.get('station_type', 'pulsonic')
+        provider = get_provider(station_type)
+        parameters = provider.get_parameters()
+        
+        return jsonify({
+            'status': 'success',
+            'data': parameters
+        })
+    except ValueError as e:
+        logger.error(f"Type de station invalide: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 400
+    except Exception as e:
+        logger.error(f"Erreur get_parameters: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
 
 
 @app.route('/api/stations', methods=['GET'])
 def get_stations():
-    """Retourne la liste des stations avec leurs métadonnées"""
+    """Retourne la liste des stations selon le type"""
     try:
-        # Charger depuis le fichier JSON
-        import json
-        with open('../data/stations.json', 'r', encoding='utf-8') as f:
-            stations = json.load(f)
+        station_type = request.args.get('station_type', 'pulsonic')
+        provider = get_provider(station_type)
+        stations = provider.get_stations()
         
         return jsonify({
             'status': 'success',
-            'data': stations
+            'data': {
+                'stations': stations,
+                'station_type': station_type
+            }
         })
-    except FileNotFoundError:
-        logger.error("Fichier stations.json non trouvé")
+    except ValueError as e:
+        logger.error(f"Type de station invalide: {str(e)}")
         return jsonify({
             'status': 'error',
-            'message': 'Fichier stations.json non trouvé'
-        }), 500
+            'message': str(e)
+        }), 400
     except Exception as e:
         logger.error(f"Erreur get_stations: {str(e)}")
         return jsonify({
@@ -135,24 +176,9 @@ def get_stations_availability():
     
     Body JSON:
     {
+        "station_type": "pulsonic",
         "stations": ["CI_BINGERVILLE", "CI_ABOBO-MAIRIE"],
         "granularity": "H"
-    }
-    
-    Response:
-    {
-        "status": "success",
-        "data": {
-            "CI_BINGERVILLE": {
-                "first_date": "2018-03-15T00:00:00",
-                "last_date": "2026-02-13T11:00:00",
-                "days_count": 2891,
-                "duration_formatted": "7 ans 11 mois",
-                "label": "BINGERVILLE",
-                "has_data": true
-            },
-            ...
-        }
     }
     """
     try:
@@ -164,6 +190,7 @@ def get_stations_availability():
                 'message': 'Paramètre "stations" requis'
             }), 400
         
+        station_type = data.get('station_type', 'pulsonic')
         stations = data['stations']
         granularity = data.get('granularity', 'H')
         
@@ -173,52 +200,21 @@ def get_stations_availability():
                 'message': 'Le paramètre "stations" doit être une liste non vide'
             }), 400
         
-        # Connexion au WebService
-        client = get_ws_client()
-        
-        result = {}
-        now = datetime.now()
-        
-        for station in stations:
-            try:
-                logger.info(f"Récupération disponibilité pour {station}")
-                
-                # Récupérer la première date
-                first_date = client.get_first_recorded_date(station, granularity)
-                
-                # Calculer la durée
-                days_count = (now - first_date).days
-                
-                result[station] = {
-                    'first_date': first_date.isoformat(),
-                    'last_date': now.isoformat(),
-                    'days_count': days_count,
-                    'duration_formatted': format_duration(days_count),
-                    'label': station.replace('CI_', ''),
-                    'has_data': True,
-                    'granularity': granularity
-                }
-                
-            except WebServiceError as e:
-                logger.warning(f"Erreur pour {station}: {str(e)}")
-                result[station] = {
-                    'has_data': False,
-                    'error': str(e),
-                    'label': station.replace('CI_', '')
-                }
-            except Exception as e:
-                logger.error(f"Erreur inattendue pour {station}: {str(e)}")
-                result[station] = {
-                    'has_data': False,
-                    'error': 'Erreur interne',
-                    'label': station.replace('CI_', '')
-                }
+        # Utiliser le provider approprié
+        provider = get_provider(station_type)
+        result = provider.get_availability(stations, granularity)
         
         return jsonify({
             'status': 'success',
             'data': result
         })
         
+    except ValueError as e:
+        logger.error(f"Type de station invalide: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 400
     except Exception as e:
         logger.error(f"Erreur get_stations_availability: {str(e)}\n{traceback.format_exc()}")
         return jsonify({
@@ -234,21 +230,12 @@ def estimate_download():
     
     Body JSON:
     {
+        "station_type": "pulsonic",
         "stations": ["CI_BINGERVILLE"],
         "params": ["Temp._inst", "Cum._pluie"],
         "start_date": "2023-01-01",
         "end_date": "2023-12-31",
         "granularity": "H"
-    }
-    
-    Response:
-    {
-        "status": "success",
-        "data": {
-            "rows": 8760,
-            "size_kb": 450,
-            "size_mb": 0.44
-        }
     }
     """
     try:
@@ -263,20 +250,19 @@ def estimate_download():
                     'message': f'Paramètre "{field}" requis'
                 }), 400
         
+        station_type = data.get('station_type', 'pulsonic')
         start_date = datetime.strptime(data['start_date'], '%Y-%m-%d')
         end_date = datetime.strptime(data['end_date'], '%Y-%m-%d')
         granularity = data.get('granularity', 'H')
         
-        num_stations = len(data['stations'])
-        num_params = len(data['params'])
-        
-        # Estimation
-        estimate = estimate_data_volume(
+        # Utiliser le provider approprié
+        provider = get_provider(station_type)
+        estimate = provider.estimate_download(
+            data['stations'],
+            data['params'],
             start_date,
             end_date,
-            granularity,
-            num_stations,
-            num_params
+            granularity
         )
         
         return jsonify({
@@ -304,6 +290,7 @@ def download_data():
     
     Body JSON:
     {
+        "station_type": "pulsonic",
         "stations": ["CI_BINGERVILLE", "CI_ABOBO-MAIRIE"],
         "params": ["Temp._inst", "Cum._pluie"],
         "start_date": "2023-01-01",
@@ -325,6 +312,7 @@ def download_data():
                     'message': f'Paramètre "{field}" requis'
                 }), 400
         
+        station_type = data.get('station_type', 'pulsonic')
         stations = data['stations']
         params = data['params']
         granularity = data.get('granularity', 'H')
@@ -339,43 +327,17 @@ def download_data():
                 'message': 'La date de début doit être avant la date de fin'
             }), 400
         
-        logger.info(f"Téléchargement demandé: {len(stations)} station(s), {len(params)} param(s), {start_date} à {end_date}")
+        logger.info(f"Téléchargement {station_type}: {len(stations)} station(s), {len(params)} param(s), {start_date} à {end_date}")
         
-        # Connexion WebService
-        client = get_ws_client()
-        
-        # Limite de jours par requête selon granularité
-        max_days = Config.GRANULARITY_LIMITS.get(granularity, 180)
-        
-        # Stocker les données par station
-        data_by_station = {}
-        
-        # Récupérer les données pour chaque station
-        for station in stations:
-            logger.info(f"Traitement de {station}")
-            data_by_station[station] = []
-            
-            # Diviser la période en blocs
-            date_blocks = split_date_range(start_date, end_date, max_days)
-            
-            for block_start, block_end in date_blocks:
-                try:
-                    logger.info(f"{station}: récupération {block_start} à {block_end}")
-                    
-                    block_data = client.get_block_sorted_value(
-                        station,
-                        params,
-                        granularity,
-                        block_start,
-                        block_end
-                    )
-                    
-                    data_by_station[station].extend(block_data)
-                    logger.info(f"{station}: {len(block_data)} lignes récupérées")
-                    
-                except WebServiceError as e:
-                    logger.warning(f"Erreur bloc {station} ({block_start}-{block_end}): {str(e)}")
-                    continue
+        # Utiliser le provider approprié
+        provider = get_provider(station_type)
+        data_by_station = provider.download_data(
+            stations,
+            params,
+            start_date,
+            end_date,
+            granularity
+        )
         
         # Vérifier si on a des données
         total_rows = sum(len(data_by_station[s]) for s in data_by_station)
@@ -397,7 +359,7 @@ def download_data():
         
         # Nom du fichier
         stations_str = '-'.join([s.replace('CI_', '') for s in stations])
-        filename = f"meteo_{stations_str}_{start_date.strftime('%Y%m%d')}-{end_date.strftime('%Y%m%d')}.csv"
+        filename = f"meteo_{station_type}_{stations_str}_{start_date.strftime('%Y%m%d')}-{end_date.strftime('%Y%m%d')}.csv"
         
         # Convertir en bytes
         csv_bytes = io.BytesIO(csv_buffer.getvalue().encode('utf-8'))
