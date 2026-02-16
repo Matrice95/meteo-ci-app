@@ -1,0 +1,193 @@
+{
+  "stations": [
+    {
+      "id": "CI_ABOBO-MAIRIE",
+      "label": "ABOBO-MAIRIE",
+      "coordinates": [5.4242, -4.0164],
+      "region": "Abidjan",
+      "type": "urbaine"
+    },
+    {
+      "id": "CI_ATTECOUBE-MAIRIE",
+      "label": "ATTECOUBE-MAIRIE",
+      "coordinates": [5.3310, -4.0456],
+      "region": "Abidjan",
+      "type": "urbaine"
+    },
+    {
+      "id": "CI_BINGERVILLE",
+      "label": "BINGERVILLE",
+      "coordinates": [5.3553, -3.8937],
+      "region": "Abidjan",
+      "type": "urbaine"
+    },
+    {
+      "id": "CI_Bobi",
+      "label": "Bobi",
+      "coordinates": [6.8167, -6.3333],
+      "region": "Ouest",
+      "type": "rurale"
+    },
+    {
+      "id": "CI_COCODY-RIVIERA-GO",
+      "label": "COCODY-RIVIERA-GO",
+      "coordinates": [5.3484, -3.9842],
+      "region": "Abidjan",
+      "type": "urbaine"
+    },
+    {
+      "id": "CI_COCODY-ST-VIATEUR",
+      "label": "COCODY-ST-VIATEUR",
+      "coordinates": [5.3667, -4.0000],
+      "region": "Abidjan",
+      "type": "urbaine"
+    },
+    {
+      "id": "CI_Dikodougou",
+      "label": "Dikodougou",
+      "coordinates": [9.0667, -5.8000],
+      "region": "Nord",
+      "type": "rurale"
+    },
+    {
+      "id": "CI_Djibrosso",
+      "label": "Djibrosso",
+      "coordinates": [6.8333, -6.4167],
+      "region": "Ouest",
+      "type": "rurale"
+    },
+    {
+      "id": "CI_Goulia",
+      "label": "Goulia",
+      "coordinates": [7.3667, -7.4333],
+      "region": "Ouest",
+      "type": "rurale"
+    },
+    {
+      "id": "CI_KOUMASSI",
+      "label": "KOUMASSI",
+      "coordinates": [5.2951, -3.9480],
+      "region": "Abidjan",
+      "type": "urbaine"
+    },
+    {
+      "id": "CI_Kamalo",
+      "label": "Kamalo",
+      "coordinates": [6.5000, -6.6667],
+      "region": "Ouest",
+      "type": "rurale"
+    },
+    {
+      "id": "CI_Kongasso",
+      "label": "Kongasso",
+      "coordinates": [9.7333, -5.4667],
+      "region": "Nord",
+      "type": "rurale"
+    },
+    {
+      "id": "CI_Koro",
+      "label": "Koro",
+      "coordinates": [9.1333, -5.6167],
+      "region": "Nord",
+      "type": "rurale"
+    },
+    {
+      "id": "CI_Kouto",
+      "label": "Kouto",
+      "coordinates": [9.5500, -5.4667],
+      "region": "Nord",
+      "type": "rurale"
+    },
+    {
+      "id": "CI_MARCORY",
+      "label": "MARCORY",
+      "coordinates": [5.2896, -4.0039],
+      "region": "Abidjan",
+      "type": "urbaine"
+    },
+    {
+      "id": "CI_Mahandiana",
+      "label": "Mahandiana",
+      "coordinates": [9.4000, -5.5000],
+      "region": "Nord",
+      "type": "rurale"
+    },
+    {
+      "id": "CI_Niellé",
+      "label": "Niellé",
+      "coordinates": [9.5333, -6.8333],
+      "region": "Nord",
+      "type": "rurale"
+    },
+    {
+      "id": "CI_Ouellé",
+      "label": "Ouellé",
+      "coordinates": [7.0833, -7.3000],
+      "region": "Ouest",
+      "type": "rurale"
+    },
+    {
+      "id": "CI_SONGON-MAIRIE",
+      "label": "SONGON-MAIRIE",
+      "coordinates": [5.2936, -4.2889],
+      "region": "Abidjan",
+      "type": "urbaine"
+    },
+    {
+      "id": "CI_Seydougou",
+      "label": "Seydougou",
+      "coordinates": [6.6833, -6.6167],
+      "region": "Ouest",
+      "type": "rurale"
+    },
+    {
+      "id": "CI_Sifie",
+      "label": "Sifie",
+      "coordinates": [6.6000, -6.3333],
+      "region": "Ouest",
+      "type": "rurale"
+    },
+    {
+      "id": "CI_Sokoro",
+      "label": "Sokoro",
+      "coordinates": [8.9667, -6.5667],
+      "region": "Centre-Ouest",
+      "type": "rurale"
+    },
+    {
+      "id": "CI_Teiningboué",
+      "label": "Teiningboué",
+      "coordinates": [7.4833, -5.4500],
+      "region": "Centre",
+      "type": "rurale"
+    },
+    {
+      "id": "CI_Tiébissou",
+      "label": "Tiébissou",
+      "coordinates": [7.1500, -5.2167],
+      "region": "Centre",
+      "type": "rurale"
+    },
+    {
+      "id": "CI_Tiémé",
+      "label": "Tiémé",
+      "coordinates": [6.6000, -7.2667],
+      "region": "Ouest",
+      "type": "rurale"
+    },
+    {
+      "id": "CI_Toumodi",
+      "label": "Toumodi",
+      "coordinates": [6.5500, -5.0167],
+      "region": "Centre",
+      "type": "rurale"
+    },
+    {
+      "id": "CI_YOPOUGON-ZONE",
+      "label": "YOPOUGON-ZONE",
+      "coordinates": [5.3361, -4.0889],
+      "region": "Abidjan",
+      "type": "urbaine"
+    }
+  ]
+}

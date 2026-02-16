@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Météo CI - Téléchargement de Données</title>
+    
+    <!-- Leaflet CSS pour la carte -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    
+    <!-- Flatpickr pour les date pickers -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+    
+    <!-- Font Awesome pour les icônes -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Notre CSS -->
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    
+    <!-- Header -->
+    <header class="header">
+        <div class="container">
+            <div class="header-content">
+                <div class="logo">
+                    <i class="fas fa-cloud-sun-rain"></i>
+                    <h1>Météo CI Hub</h1>
+                </div>
+                <div class="header-info">
+                    <div class="status-badge" id="connectionStatus">
+                        <i class="fas fa-circle"></i>
+                        <span>Connexion...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <div class="container">
+            
+            <!-- Instructions -->
+            <section class="intro-section">
+                <h2>Données temps réel du réseau de stations SODEXAM</h2>
+                <p>Sélectionnez les stations, la période et les paramètres pour télécharger vos données au format CSV.</p>
+            </section>
+
+            <!-- Étape 1 : Sélection des stations -->
+            <section class="section">
+                <div class="section-header">
+                    <div class="step-badge">1</div>
+                    <h3>Sélection des stations</h3>
+                </div>
+                
+                <div class="stations-container">
+                    <!-- Carte interactive -->
+                    <div class="map-container">
+                        <div id="map"></div>
+                        <div class="map-legend">
+                            <div class="legend-item">
+                                <span class="legend-marker urbaine"></span>
+                                <span>Station urbaine</span>
+                            </div>
+                            <div class="legend-item">
+                                <span class="legend-marker rurale"></span>
+                                <span>Station rurale</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Liste des stations -->
+                    <div class="stations-list">
+                        <div class="list-header">
+                            <input type="text" id="searchStation" placeholder="🔍 Rechercher une station..." class="search-input">
+                            <div class="filter-buttons">
+                                <button class="btn-filter active" data-filter="all">Toutes</button>
+                                <button class="btn-filter" data-filter="urbaine">Urbaines</button>
+                                <button class="btn-filter" data-filter="rurale">Rurales</button>
+                            </div>
+                        </div>
+                        
+                        <div class="select-actions">
+                            <button id="selectAllStations" class="btn-link">Tout sélectionner</button>
+                            <button id="deselectAllStations" class="btn-link">Tout désélectionner</button>
+                            <span class="selected-count">0 station(s) sélectionnée(s)</span>
+                        </div>
+                        
+                        <div id="stationsList" class="stations-grid">
+                            <!-- Les stations seront chargées ici par JS -->
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Étape 2 : Disponibilité des données -->
+            <section class="section" id="availabilitySection" style="display: none;">
+                <div class="section-header">
+                    <div class="step-badge">2</div>
+                    <h3>Disponibilité des données</h3>
+                </div>
+                
+                <div class="availability-container">
+                    <div class="granularity-selector">
+                        <label for="granularity">Granularité des données :</label>
+                        <select id="granularity" class="form-select">
+                            <option value="H" selected>Horaire</option>
+                            <option value="J">Journalière</option>
+                            <option value="X">6 minutes</option>
+                            <option value="U">Minute</option>
+                        </select>
+                        <button id="checkAvailability" class="btn btn-secondary">
+                            <i class="fas fa-sync"></i> Vérifier la disponibilité
+                        </button>
+                    </div>
+                    
+                    <div id="availabilityResults" class="availability-results">
+                        <!-- Les résultats seront affichés ici -->
+                    </div>
+                </div>
+            </section>
+
+            <!-- Étape 3 : Sélection de la période -->
+            <section class="section" id="periodSection" style="display: none;">
+                <div class="section-header">
+                    <div class="step-badge">3</div>
+                    <h3>Période de téléchargement</h3>
+                </div>
+                
+                <div class="period-container">
+                    <div class="date-inputs">
+                        <div class="form-group">
+                            <label for="startDate">
+                                <i class="fas fa-calendar-alt"></i> Date de début
+                            </label>
+                            <input type="text" id="startDate" class="form-input" placeholder="YYYY-MM-DD" readonly>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="endDate">
+                                <i class="fas fa-calendar-alt"></i> Date de fin
+                            </label>
+                            <input type="text" id="endDate" class="form-input" placeholder="YYYY-MM-DD" readonly>
+                        </div>
+                    </div>
+                    
+                    <div class="quick-dates">
+                        <span>Raccourcis :</span>
+                        <button class="btn-quick-date" data-period="7">7 derniers jours</button>
+                        <button class="btn-quick-date" data-period="30">30 derniers jours</button>
+                        <button class="btn-quick-date" data-period="90">3 derniers mois</button>
+                        <button class="btn-quick-date" data-period="365">Dernière année</button>
+                    </div>
+                    
+                    <div id="estimateInfo" class="estimate-info" style="display: none;">
+                        <!-- Estimation du volume -->
+                    </div>
+                </div>
+            </section>
+
+            <!-- Étape 4 : Sélection des paramètres -->
+            <section class="section" id="parametersSection" style="display: none;">
+                <div class="section-header">
+                    <div class="step-badge">4</div>
+                    <h3>Sélection des paramètres</h3>
+                </div>
+                
+                <div class="parameters-container">
+                    <div class="parameters-header">
+                        <input type="text" id="searchParameter" placeholder="🔍 Rechercher un paramètre..." class="search-input">
+                        <div class="select-actions">
+                            <button id="selectAllParams" class="btn-link">Tout sélectionner</button>
+                            <button id="deselectAllParams" class="btn-link">Tout désélectionner</button>
+                            <span class="selected-params-count">0 paramètre(s) sélectionné(s)</span>
+                        </div>
+                    </div>
+                    
+                    <div id="parametersList" class="parameters-grid">
+                        <!-- Les paramètres seront chargés ici par JS -->
+                    </div>
+                </div>
+            </section>
+
+            <!-- Étape 5 : Téléchargement -->
+            <section class="section" id="downloadSection" style="display: none;">
+                <div class="section-header">
+                    <div class="step-badge">5</div>
+                    <h3>Téléchargement</h3>
+                </div>
+                
+                <div class="download-container">
+                    <div class="download-summary">
+                        <h4>Récapitulatif de votre demande</h4>
+                        <div class="summary-grid">
+                            <div class="summary-item">
+                                <i class="fas fa-map-marker-alt"></i>
+                                <div>
+                                    <strong>Stations</strong>
+                                    <span id="summaryStations">-</span>
+                                </div>
+                            </div>
+                            <div class="summary-item">
+                                <i class="fas fa-calendar-range"></i>
+                                <div>
+                                    <strong>Période</strong>
+                                    <span id="summaryPeriod">-</span>
+                                </div>
+                            </div>
+                            <div class="summary-item">
+                                <i class="fas fa-sliders-h"></i>
+                                <div>
+                                    <strong>Paramètres</strong>
+                                    <span id="summaryParams">-</span>
+                                </div>
+                            </div>
+                            <div class="summary-item">
+                                <i class="fas fa-database"></i>
+                                <div>
+                                    <strong>Volume estimé</strong>
+                                    <span id="summaryVolume">-</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="download-actions">
+                        <button id="downloadBtn" class="btn btn-primary btn-large">
+                            <i class="fas fa-download"></i>
+                            Télécharger le fichier CSV
+                        </button>
+                    </div>
+                    
+                    <div id="downloadProgress" class="download-progress" style="display: none;">
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="progressFill"></div>
+                        </div>
+                        <p class="progress-text" id="progressText">Préparation du téléchargement...</p>
+                    </div>
+                </div>
+            </section>
+
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <p>&copy; 2026 Météo CI - Plateforme de téléchargement de données météorologiques</p>
+        </div>
+    </footer>
+
+    <!-- Notification Toast -->
+    <div id="toast" class="toast">
+        <span id="toastMessage"></span>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/fr.js"></script>
+    
+    <script src="js/api.js"></script>
+    <script src="js/map.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
