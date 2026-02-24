@@ -105,4 +105,4 @@ class Config:
     MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16MB max
     
     # CORS
-    CORS_ORIGINS = ["http://localhost:3000", "http://127.0.0.1:5500", "http://localhost:8000"]
+    CORS_ORIGINS = ["http://localhost:3000", "http://127.0.0.1:5500", "http://localhost:8000", "http://127.0.0.1:8000"]
