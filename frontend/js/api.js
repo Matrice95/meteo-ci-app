@@ -98,6 +98,62 @@ const ApiClient = (function () {
 
             const blob = await response.blob();
             return blob;
+        },
+
+        // ---- Scheduler multi-tâches ----
+        async getSchedulerTasks() {
+            return getJSON(`${API_BASE_URL}/api/scheduler/tasks`);
+        },
+
+        async createSchedulerTask(taskData) {
+            const res = await postJSON(`${API_BASE_URL}/api/scheduler/tasks`, taskData);
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.message || "Erreur création tâche");
+            }
+            return res.json();
+        },
+
+        async updateSchedulerTask(taskId, taskData) {
+            const res = await fetch(`${API_BASE_URL}/api/scheduler/tasks/${taskId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(taskData)
+            });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.message || "Erreur modification tâche");
+            }
+            return res.json();
+        },
+
+        async deleteSchedulerTask(taskId) {
+            const res = await fetch(`${API_BASE_URL}/api/scheduler/tasks/${taskId}`, {
+                method: 'DELETE'
+            });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.message || "Erreur suppression tâche");
+            }
+            return res.json();
+        },
+
+        async toggleSchedulerTask(taskId, active) {
+            const res = await postJSON(`${API_BASE_URL}/api/scheduler/tasks/${taskId}/toggle`, { active });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.message || "Erreur basculement tâche");
+            }
+            return res.json();
+        },
+
+        async runSchedulerTaskNow(taskId) {
+            const res = await postJSON(`${API_BASE_URL}/api/scheduler/tasks/${taskId}/run-now`, {});
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.message || "Erreur lancement immédiat");
+            }
+            return res.json();
         }
     };
 })();

@@ -57,12 +57,13 @@ document.addEventListener("DOMContentLoaded", () => {
     let lastEstimate = null;        // résultat /api/estimate
 
     // Initialisation générale
-    initConnectionStatus();
-    initStationTypeSelection();
-    initDatePickers();
-    loadStationsAndInitMap();
-    loadParameters();
-    initEventListeners();
+    try { initConnectionStatus(); } catch(e) { console.error('initConnectionStatus:', e); }
+    try { initStationTypeSelection(); } catch(e) { console.error('initStationTypeSelection:', e); }
+    try { initDatePickers(); } catch(e) { console.error('initDatePickers:', e); }
+    try { loadStationsAndInitMap(); } catch(e) { console.error('loadStationsAndInitMap:', e); }
+    try { loadParameters(); } catch(e) { console.error('loadParameters:', e); }
+    try { initEventListeners(); } catch(e) { console.error('initEventListeners:', e); }
+    try { initScheduler(); } catch(e) { console.error('initScheduler:', e); }
 
     // ---------------------------
     // Fonctions d'initialisation
@@ -137,14 +138,22 @@ document.addEventListener("DOMContentLoaded", () => {
         flatpickr.localize(flatpickr.l10ns.fr);
 
         flatpickrStart = flatpickr(startDateEl, {
-            dateFormat: "Y-m-d",
+            dateFormat: "Y-m-d H:i",
+            enableTime: true,
+            time_24hr: true,
             maxDate: "today",
+            defaultHour: 0,
+            defaultMinute: 0,
             onChange: () => onDatesChanged()
         });
 
         flatpickrEnd = flatpickr(endDateEl, {
-            dateFormat: "Y-m-d",
+            dateFormat: "Y-m-d H:i",
+            enableTime: true,
+            time_24hr: true,
             maxDate: "today",
+            defaultHour: 23,
+            defaultMinute: 59,
             onChange: () => onDatesChanged()
         });
     }
@@ -432,13 +441,21 @@ document.addEventListener("DOMContentLoaded", () => {
             return;
         }
 
-        // Utiliser la dernière date commune approximative = aujourd'hui
-        const end = new Date();
-        const start = new Date();
-        start.setDate(end.getDate() - days + 1);
+        const now = new Date();
+        const end = new Date(now);
 
-        flatpickrStart.setDate(start, true);
-        flatpickrEnd.setDate(end, true);
+        if (days === 0) {
+            // Aujourd'hui : de 00:00 à maintenant
+            const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0);
+            flatpickrStart.setDate(start, true);
+            flatpickrEnd.setDate(end, true);
+        } else {
+            const start = new Date(now);
+            start.setDate(now.getDate() - days + 1);
+            start.setHours(0, 0, 0, 0);
+            flatpickrStart.setDate(start, true);
+            flatpickrEnd.setDate(end, true);
+        }
 
         onDatesChanged();
     }
@@ -716,7 +733,9 @@ document.addEventListener("DOMContentLoaded", () => {
         const stationPart = selectedStationIds
             .map((id) => id.replace("CI_", ""))
             .join("-");
-        return `meteo_${stationPart}_${startDate.replace(/-/g, "")}-${endDate.replace(/-/g, "")}.csv`;
+        const cleanStart = startDate.replace(/[-: ]/g, "").slice(0, 12);
+        const cleanEnd = endDate.replace(/[-: ]/g, "").slice(0, 12);
+        return `meteo_${stationPart}_${cleanStart}-${cleanEnd}.csv`;
     }
 
     function showProgress(percent, text) {
@@ -750,4 +769,687 @@ document.addEventListener("DOMContentLoaded", () => {
             toastEl.classList.remove("show");
         }, 4000);
     }
+
+
+    // ---------------------------
+    // Planificateur multi-tâches
+    // ---------------------------
+
+    let allTasks = [];
+    let taskCountdownIntervals = {};
+
+    // ─── État du modal ──────────────────────────────────
+    let modalStep = 0;
+    const MODAL_STEPS = [
+        { key: 'network',  label: 'Réseau',       icon: 'fa-network-wired' },
+        { key: 'stations', label: 'Stations',     icon: 'fa-map-marker-alt' },
+        { key: 'period',   label: 'Période',      icon: 'fa-calendar-alt' },
+        { key: 'params',   label: 'Paramètres',   icon: 'fa-sliders-h' },
+        { key: 'schedule', label: 'Planification', icon: 'fa-clock' },
+    ];
+    let modalData = {
+        name: '', station_type: 'pulsonic', stations: [],
+        granularity: 'H', period_days: 1, params: [],
+        hour: 6, minute: 0,
+    };
+    let modalStationsCache = [];
+    let modalParamsCache = {};
+    let editingTaskId = null;
+
+    const GRAN_LABELS = { H: 'Horaire', J: 'Journalière', X: '6 min', U: 'Minute' };
+
+    function initScheduler() {
+        loadTasks();
+        document.getElementById('addTaskBtn').addEventListener('click', () => openTaskModal());
+        document.getElementById('modalCloseBtn').addEventListener('click', closeTaskModal);
+        document.getElementById('modalPrevBtn').addEventListener('click', modalPrev);
+        document.getElementById('modalNextBtn').addEventListener('click', modalNext);
+        document.getElementById('taskModal').addEventListener('click', (e) => {
+            if (e.target.id === 'taskModal') closeTaskModal();
+        });
+        document.getElementById('taskList').addEventListener('click', onTaskListClick);
+        document.getElementById('taskList').addEventListener('change', onTaskListChange);
+        setInterval(loadTasks, 30000);
+    }
+
+    function loadTasks() {
+        ApiClient.getSchedulerTasks()
+            .then(res => {
+                if (res.status === 'success') {
+                    allTasks = res.data.tasks || [];
+                    renderTaskList(res.data);
+                }
+            })
+            .catch(err => console.warn('Scheduler tasks error:', err));
+    }
+
+    // ─── Rendu de la liste de tâches ────────────────────
+
+    function renderTaskList(data) {
+        const countEl = document.getElementById('activeTasksCount');
+        const badgeEl = document.getElementById('activeTasksBadge');
+        countEl.textContent = data.active_count || 0;
+        badgeEl.classList.toggle('has-active', (data.active_count || 0) > 0);
+
+        const listEl = document.getElementById('taskList');
+
+        if (!data.tasks || data.tasks.length === 0) {
+            listEl.innerHTML = `
+                <div class="task-empty-state">
+                    <div class="empty-icon"><i class="fas fa-calendar-plus"></i></div>
+                    <h4>Aucune tâche planifiée</h4>
+                    <p>Créez votre première tâche pour automatiser les téléchargements quotidiens</p>
+                </div>`;
+            return;
+        }
+
+        listEl.innerHTML = data.tasks.map(renderTaskCard).join('');
+
+        // Countdown timers
+        Object.values(taskCountdownIntervals).forEach(clearInterval);
+        taskCountdownIntervals = {};
+        data.tasks.forEach(task => {
+            if (task.active && task.next_run) startTaskCountdown(task);
+        });
+    }
+
+    function renderTaskCard(task) {
+        const isActive = task.active;
+        const netLabel = task.station_type === 'pulsonic' ? '📡 Pulsonic' : '🔧 Campbell';
+        const netClass = task.station_type || 'pulsonic';
+
+        let statusHtml = '';
+        if (task.last_run) {
+            const cls = task.last_status === 'success' ? 'success' : task.last_status === 'warning' ? 'warning' : 'error';
+            const ico = task.last_status === 'success' ? 'fa-check-circle' : task.last_status === 'warning' ? 'fa-exclamation-triangle' : 'fa-times-circle';
+            const txt = task.last_status === 'success' ? 'Succès' : task.last_status === 'warning' ? 'Attention' : 'Erreur';
+            statusHtml = `
+                <div class="task-last-run">
+                    <span class="task-status-pill ${cls}"><i class="fas ${ico}"></i> ${txt}</span>
+                    <span class="task-last-detail">${task.last_message || ''}</span>
+                </div>`;
+        }
+
+        let nextHtml = '';
+        if (isActive && task.next_run_display) {
+            nextHtml = `
+                <div class="task-next-run">
+                    <i class="fas fa-hourglass-half"></i> ${task.next_run_display}
+                    <span class="task-countdown" id="countdown-${task.id}"></span>
+                </div>`;
+        }
+
+        return `
+        <div class="task-card ${isActive ? 'active' : ''}" data-task-id="${task.id}">
+            <div class="task-card-top">
+                <div class="task-card-info">
+                    <span class="task-network-badge ${netClass}">${netLabel}</span>
+                    <h4 class="task-name">${_esc(task.name)}</h4>
+                </div>
+                <label class="toggle-switch mini" title="${isActive ? 'Désactiver' : 'Activer'}">
+                    <input type="checkbox" data-action="toggle" data-task-id="${task.id}" ${isActive ? 'checked' : ''}>
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+            <div class="task-card-meta">
+                <span class="meta-chip"><i class="fas fa-map-marker-alt"></i> ${(task.stations||[]).length} station(s)</span>
+                <span class="meta-chip"><i class="fas fa-sliders-h"></i> ${(task.params||[]).length} param(s)</span>
+                <span class="meta-chip"><i class="fas fa-clock"></i> ${GRAN_LABELS[task.granularity]||task.granularity} · ${task.period_days}j</span>
+                <span class="meta-chip highlight"><i class="fas fa-bell"></i> ${String(task.hour).padStart(2,'0')}:${String(task.minute).padStart(2,'0')} GMT</span>
+            </div>
+            ${statusHtml || nextHtml ? `<div class="task-card-status">${statusHtml}${nextHtml}</div>` : ''}
+            <div class="task-card-actions">
+                <button class="btn-task-action" data-action="run-now" data-task-id="${task.id}" title="Lancer maintenant"><i class="fas fa-play"></i></button>
+                <button class="btn-task-action" data-action="edit" data-task-id="${task.id}" title="Modifier"><i class="fas fa-edit"></i></button>
+                <button class="btn-task-action danger" data-action="delete" data-task-id="${task.id}" title="Supprimer"><i class="fas fa-trash"></i></button>
+            </div>
+        </div>`;
+    }
+
+    function _esc(str) {
+        const d = document.createElement('div');
+        d.textContent = str || '';
+        return d.innerHTML;
+    }
+
+    function startTaskCountdown(task) {
+        const update = () => {
+            const el = document.getElementById(`countdown-${task.id}`);
+            if (!el) return;
+            const now = new Date();
+            const target = new Date(task.next_run + 'Z');
+            const diff = Math.max(0, Math.floor((target - now) / 1000));
+            if (diff <= 0) {
+                el.textContent = '⏳ En cours...';
+                setTimeout(loadTasks, 5000);
+                clearInterval(taskCountdownIntervals[task.id]);
+                return;
+            }
+            const h = Math.floor(diff / 3600);
+            const m = Math.floor((diff % 3600) / 60);
+            const s = diff % 60;
+            let parts = [];
+            if (h > 0) parts.push(`${h}h`);
+            parts.push(`${String(m).padStart(2,'0')}min`);
+            parts.push(`${String(s).padStart(2,'0')}s`);
+            el.textContent = `(${parts.join(' ')})`;
+        };
+        update();
+        taskCountdownIntervals[task.id] = setInterval(update, 1000);
+    }
+
+    // ─── Événements sur la liste ────────────────────────
+
+    function onTaskListClick(e) {
+        const btn = e.target.closest('[data-action]');
+        if (!btn || btn.tagName === 'INPUT') return;
+        const action = btn.dataset.action;
+        const taskId = btn.dataset.taskId;
+        if (!taskId) return;
+        switch (action) {
+            case 'run-now': runTaskNow(taskId, btn); break;
+            case 'edit':    openTaskModal(taskId); break;
+            case 'delete':  deleteTask(taskId); break;
+        }
+    }
+
+    function onTaskListChange(e) {
+        const input = e.target;
+        if (input.dataset.action === 'toggle') {
+            toggleTask(input.dataset.taskId, input.checked, input);
+        }
+    }
+
+    function toggleTask(taskId, active, inputEl) {
+        ApiClient.toggleSchedulerTask(taskId, active)
+            .then(res => { showToast(res.message, 'success'); loadTasks(); })
+            .catch(err => { if (inputEl) inputEl.checked = !active; showToast('Erreur : ' + err.message, 'error'); });
+    }
+
+    function runTaskNow(taskId, btn) {
+        const origHTML = btn.innerHTML;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+        btn.disabled = true;
+        ApiClient.runSchedulerTaskNow(taskId)
+            .then(res => { showToast(res.message, 'success'); setTimeout(loadTasks, 5000); setTimeout(loadTasks, 15000); })
+            .catch(err => { showToast('Erreur : ' + err.message, 'error'); })
+            .finally(() => { setTimeout(() => { btn.innerHTML = origHTML; btn.disabled = false; }, 3000); });
+    }
+
+    function deleteTask(taskId) {
+        const task = allTasks.find(t => t.id === taskId);
+        if (!confirm(`Supprimer la tâche « ${task ? task.name : taskId} » ?`)) return;
+        ApiClient.deleteSchedulerTask(taskId)
+            .then(res => { showToast(res.message, 'success'); loadTasks(); })
+            .catch(err => { showToast('Erreur : ' + err.message, 'error'); });
+    }
+
+    // ─── Modal : ouverture / fermeture ──────────────────
+
+    function openTaskModal(taskId = null) {
+        editingTaskId = taskId;
+        modalStep = 0;
+        if (taskId) {
+            const task = allTasks.find(t => t.id === taskId);
+            if (!task) return;
+            modalData = {
+                name: task.name || '',
+                station_type: task.station_type || 'pulsonic',
+                stations: [...(task.stations || [])],
+                granularity: task.granularity || 'H',
+                period_days: task.period_days || 1,
+                params: [...(task.params || [])],
+                hour: task.hour ?? 6,
+                minute: task.minute ?? 0,
+            };
+            document.getElementById('modalTitle').innerHTML = '<i class="fas fa-edit"></i> Modifier la tâche';
+        } else {
+            modalData = { name: '', station_type: 'pulsonic', stations: [], granularity: 'H', period_days: 1, params: [], hour: 6, minute: 0 };
+            document.getElementById('modalTitle').innerHTML = '<i class="fas fa-plus-circle"></i> Nouvelle tâche planifiée';
+        }
+        modalStationsCache = [];
+        modalParamsCache = {};
+        document.getElementById('taskModal').classList.add('open');
+        document.body.style.overflow = 'hidden';
+        renderModalStep();
+    }
+
+    function closeTaskModal() {
+        document.getElementById('taskModal').classList.remove('open');
+        document.body.style.overflow = '';
+    }
+
+    // ─── Modal : navigation ─────────────────────────────
+
+    function renderModalStepper() {
+        document.getElementById('modalStepper').innerHTML = MODAL_STEPS.map((s, i) => `
+            <div class="step-indicator ${i === modalStep ? 'active' : ''} ${i < modalStep ? 'done' : ''}">
+                <span class="step-dot">${i < modalStep ? '<i class="fas fa-check"></i>' : (i + 1)}</span>
+                <span class="step-text">${s.label}</span>
+            </div>
+        `).join('<div class="step-line"></div>');
+    }
+
+    function renderModalStep() {
+        renderModalStepper();
+        const body = document.getElementById('modalBody');
+        const prevBtn = document.getElementById('modalPrevBtn');
+        const nextBtn = document.getElementById('modalNextBtn');
+
+        prevBtn.style.display = modalStep > 0 ? '' : 'none';
+        if (modalStep < MODAL_STEPS.length - 1) {
+            nextBtn.innerHTML = 'Suivant <i class="fas fa-arrow-right"></i>';
+            nextBtn.className = 'btn btn-primary';
+        } else {
+            nextBtn.innerHTML = editingTaskId
+                ? '<i class="fas fa-save"></i> Enregistrer'
+                : '<i class="fas fa-plus"></i> Créer la tâche';
+            nextBtn.className = 'btn btn-primary btn-create';
+        }
+
+        switch (MODAL_STEPS[modalStep].key) {
+            case 'network':  renderStepNetwork(body); break;
+            case 'stations': renderStepStations(body); break;
+            case 'period':   renderStepPeriod(body); break;
+            case 'params':   renderStepParams(body); break;
+            case 'schedule': renderStepSchedule(body); break;
+        }
+    }
+
+    function modalNext() {
+        if (!validateCurrentStep()) return;
+        if (modalStep < MODAL_STEPS.length - 1) {
+            modalStep++;
+            renderModalStep();
+        } else {
+            submitTask();
+        }
+    }
+
+    function modalPrev() {
+        if (modalStep > 0) { modalStep--; renderModalStep(); }
+    }
+
+    function validateCurrentStep() {
+        switch (MODAL_STEPS[modalStep].key) {
+            case 'network':
+                const nameIn = document.getElementById('taskNameInput');
+                if (nameIn) modalData.name = nameIn.value.trim();
+                if (!modalData.name) { showToast('Veuillez saisir un nom pour la tâche', 'warning'); return false; }
+                return true;
+            case 'stations':
+                if (modalData.stations.length === 0) { showToast('Sélectionnez au moins une station', 'warning'); return false; }
+                return true;
+            case 'params':
+                if (modalData.params.length === 0) { showToast('Sélectionnez au moins un paramètre', 'warning'); return false; }
+                return true;
+            default:
+                return true;
+        }
+    }
+
+    // ─── Étape 1 : Réseau ───────────────────────────────
+
+    function renderStepNetwork(container) {
+        container.innerHTML = `
+            <div class="modal-step-content">
+                <div class="form-group">
+                    <label class="form-label"><i class="fas fa-tag"></i> Nom de la tâche</label>
+                    <input type="text" id="taskNameInput" class="form-input"
+                           value="${_esc(modalData.name)}"
+                           placeholder="Ex : Téléchargement Pulsonic quotidien">
+                    <small class="form-hint">Un nom descriptif pour identifier cette tâche</small>
+                </div>
+                <div class="form-group">
+                    <label class="form-label"><i class="fas fa-network-wired"></i> Type de réseau</label>
+                    <div class="network-card-grid">
+                        <div class="network-card ${modalData.station_type === 'pulsonic' ? 'selected' : ''}" data-type="pulsonic">
+                            <span class="network-icon">📡</span>
+                            <div class="network-info">
+                                <strong>Pulsonic</strong>
+                                <small>Réseau principal SODEXAM</small>
+                            </div>
+                            <span class="network-check"><i class="fas fa-check-circle"></i></span>
+                        </div>
+                        <div class="network-card disabled" data-type="campbell">
+                            <span class="network-icon">🔧</span>
+                            <div class="network-info">
+                                <strong>Campbell</strong>
+                                <small>Stations spécialisées</small>
+                            </div>
+                            <span class="network-badge-soon">Prochainement</span>
+                        </div>
+                    </div>
+                </div>
+            </div>`;
+        container.querySelectorAll('.network-card:not(.disabled)').forEach(card => {
+            card.addEventListener('click', () => {
+                container.querySelectorAll('.network-card').forEach(c => c.classList.remove('selected'));
+                card.classList.add('selected');
+                modalData.station_type = card.dataset.type;
+                // Vider la cache des stations si le type change
+                modalStationsCache = [];
+                modalParamsCache = {};
+                modalData.stations = [];
+                modalData.params = [];
+            });
+        });
+    }
+
+    // ─── Étape 2 : Stations ─────────────────────────────
+
+    function renderStepStations(container) {
+        container.innerHTML = `
+            <div class="modal-step-content">
+                <div class="modal-step-toolbar">
+                    <input type="text" id="modalSearchStation" class="search-input" placeholder="🔍 Rechercher une station...">
+                    <div class="toolbar-actions">
+                        <button class="btn-link" id="modalSelectAllSt">Tout sélectionner</button>
+                        <button class="btn-link" id="modalDeselectAllSt">Tout désélectionner</button>
+                    </div>
+                    <span class="selection-badge" id="modalStCount">${modalData.stations.length} sélectionnée(s)</span>
+                </div>
+                <div class="modal-list-container" id="modalStList">
+                    <div class="loading-spinner"><i class="fas fa-spinner fa-spin"></i> Chargement des stations...</div>
+                </div>
+            </div>`;
+
+        // Charger les stations
+        if (modalStationsCache.length > 0 && modalStationsCache._stype === modalData.station_type) {
+            renderModalStations();
+        } else {
+            ApiClient.getStations(modalData.station_type)
+                .then(res => {
+                    modalStationsCache = res.data?.stations || res.data || [];
+                    modalStationsCache._stype = modalData.station_type;
+                    renderModalStations();
+                })
+                .catch(err => {
+                    const el = document.getElementById('modalStList');
+                    if (el) el.innerHTML = `<p class="error-msg">Erreur : ${err.message}</p>`;
+                });
+        }
+
+        document.getElementById('modalSearchStation').addEventListener('input', renderModalStations);
+        document.getElementById('modalSelectAllSt').addEventListener('click', () => {
+            modalData.stations = modalStationsCache.map(s => s.id);
+            renderModalStations();
+        });
+        document.getElementById('modalDeselectAllSt').addEventListener('click', () => {
+            modalData.stations = [];
+            renderModalStations();
+        });
+    }
+
+    function renderModalStations() {
+        const search = (document.getElementById('modalSearchStation')?.value || '').toLowerCase().trim();
+        const filtered = modalStationsCache.filter(s =>
+            !search || s.label.toLowerCase().includes(search) || s.id.toLowerCase().includes(search) || (s.region && s.region.toLowerCase().includes(search))
+        );
+        const listEl = document.getElementById('modalStList');
+        if (!listEl) return;
+
+        listEl.innerHTML = filtered.map(s => {
+            const checked = modalData.stations.includes(s.id);
+            return `
+                <div class="modal-list-item ${checked ? 'selected' : ''}" data-id="${s.id}">
+                    <input type="checkbox" ${checked ? 'checked' : ''}>
+                    <div class="item-info">
+                        <strong>${s.label}</strong>
+                        <small>${s.region || ''}</small>
+                    </div>
+                    <span class="item-type ${s.type || ''}">${s.type === 'urbaine' ? 'Urbain' : 'Rural'}</span>
+                </div>`;
+        }).join('');
+
+        if (filtered.length === 0) {
+            listEl.innerHTML = '<p class="empty-msg">Aucune station trouvée</p>';
+        }
+
+        listEl.querySelectorAll('.modal-list-item').forEach(el => {
+            el.addEventListener('click', (e) => {
+                if (e.target.tagName === 'INPUT') return;
+                toggleModalItem(el.dataset.id, modalData.stations, 'modalStList', 'modalStCount', 'sélectionnée(s)');
+            });
+            el.querySelector('input')?.addEventListener('change', () => {
+                toggleModalItem(el.dataset.id, modalData.stations, 'modalStList', 'modalStCount', 'sélectionnée(s)');
+            });
+        });
+
+        const countEl = document.getElementById('modalStCount');
+        if (countEl) countEl.textContent = `${modalData.stations.length} sélectionnée(s)`;
+    }
+
+    function toggleModalItem(id, arr, listContainerId, countId, countSuffix) {
+        const idx = arr.indexOf(id);
+        if (idx >= 0) arr.splice(idx, 1);
+        else arr.push(id);
+
+        const container = document.getElementById(listContainerId);
+        const item = container?.querySelector(`[data-id="${id}"]`);
+        if (item) {
+            const isSelected = arr.includes(id);
+            item.classList.toggle('selected', isSelected);
+            const cb = item.querySelector('input');
+            if (cb) cb.checked = isSelected;
+        }
+        const countEl = document.getElementById(countId);
+        if (countEl) countEl.textContent = `${arr.length} ${countSuffix}`;
+    }
+
+    // ─── Étape 3 : Période ──────────────────────────────
+
+    function renderStepPeriod(container) {
+        const granOptions = [
+            { value: 'H', label: 'Horaire', desc: 'Une valeur par heure' },
+            { value: 'J', label: 'Journalière', desc: 'Une valeur par jour' },
+            { value: 'X', label: '6 minutes', desc: 'Haute résolution' },
+            { value: 'U', label: 'Minute', desc: 'Résolution maximale' },
+        ];
+        const periodOptions = [1, 3, 7, 15, 30];
+
+        container.innerHTML = `
+            <div class="modal-step-content">
+                <div class="form-group">
+                    <label class="form-label"><i class="fas fa-ruler-horizontal"></i> Granularité des données</label>
+                    <div class="option-card-grid">
+                        ${granOptions.map(g => `
+                            <div class="option-card ${modalData.granularity === g.value ? 'selected' : ''}" data-value="${g.value}">
+                                <strong>${g.label}</strong>
+                                <small>${g.desc}</small>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label"><i class="fas fa-history"></i> Période de récupération</label>
+                    <p class="form-hint">Nombre de jours précédents téléchargés à chaque exécution</p>
+                    <div class="period-btn-grid">
+                        ${periodOptions.map(d => `
+                            <button class="period-btn ${modalData.period_days === d ? 'selected' : ''}" data-days="${d}">
+                                ${d} jour${d > 1 ? 's' : ''}
+                            </button>
+                        `).join('')}
+                    </div>
+                </div>
+            </div>`;
+
+        container.querySelectorAll('.option-card').forEach(card => {
+            card.addEventListener('click', () => {
+                container.querySelectorAll('.option-card').forEach(c => c.classList.remove('selected'));
+                card.classList.add('selected');
+                modalData.granularity = card.dataset.value;
+            });
+        });
+        container.querySelectorAll('.period-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                container.querySelectorAll('.period-btn').forEach(b => b.classList.remove('selected'));
+                btn.classList.add('selected');
+                modalData.period_days = parseInt(btn.dataset.days, 10);
+            });
+        });
+    }
+
+    // ─── Étape 4 : Paramètres ───────────────────────────
+
+    function renderStepParams(container) {
+        container.innerHTML = `
+            <div class="modal-step-content">
+                <div class="modal-step-toolbar">
+                    <input type="text" id="modalSearchParam" class="search-input" placeholder="🔍 Rechercher un paramètre...">
+                    <div class="toolbar-actions">
+                        <button class="btn-link" id="modalSelectAllPr">Tout sélectionner</button>
+                        <button class="btn-link" id="modalDeselectAllPr">Tout désélectionner</button>
+                    </div>
+                    <span class="selection-badge" id="modalPrCount">${modalData.params.length} sélectionné(s)</span>
+                </div>
+                <div class="modal-list-container" id="modalPrList">
+                    <div class="loading-spinner"><i class="fas fa-spinner fa-spin"></i> Chargement des paramètres...</div>
+                </div>
+            </div>`;
+
+        if (Object.keys(modalParamsCache).length > 0 && modalParamsCache._stype === modalData.station_type) {
+            renderModalParams();
+        } else {
+            ApiClient.getParameters(modalData.station_type)
+                .then(res => {
+                    modalParamsCache = res.data || {};
+                    modalParamsCache._stype = modalData.station_type;
+                    renderModalParams();
+                })
+                .catch(err => {
+                    const el = document.getElementById('modalPrList');
+                    if (el) el.innerHTML = `<p class="error-msg">Erreur : ${err.message}</p>`;
+                });
+        }
+
+        document.getElementById('modalSearchParam').addEventListener('input', renderModalParams);
+        document.getElementById('modalSelectAllPr').addEventListener('click', () => {
+            modalData.params = [];
+            Object.values(modalParamsCache).forEach(cat => {
+                if (cat && cat.params) cat.params.forEach(p => modalData.params.push(p.id));
+            });
+            renderModalParams();
+        });
+        document.getElementById('modalDeselectAllPr').addEventListener('click', () => {
+            modalData.params = [];
+            renderModalParams();
+        });
+    }
+
+    function renderModalParams() {
+        const search = (document.getElementById('modalSearchParam')?.value || '').toLowerCase().trim();
+        const listEl = document.getElementById('modalPrList');
+        if (!listEl) return;
+
+        let html = '';
+        Object.entries(modalParamsCache).forEach(([catKey, cat]) => {
+            if (catKey.startsWith('_') || !cat || !cat.params) return;
+            const filteredP = cat.params.filter(p =>
+                !search || p.id.toLowerCase().includes(search) || p.label.toLowerCase().includes(search)
+            );
+            if (filteredP.length === 0) return;
+
+            html += `<div class="modal-param-category">
+                <div class="param-cat-header">${cat.label}</div>
+                <div class="param-cat-items">
+                    ${filteredP.map(p => {
+                        const checked = modalData.params.includes(p.id);
+                        return `
+                            <div class="modal-list-item compact ${checked ? 'selected' : ''}" data-id="${p.id}">
+                                <input type="checkbox" ${checked ? 'checked' : ''}>
+                                <span class="param-id">${p.id}</span>
+                                <span class="param-label">${p.label}</span>
+                            </div>`;
+                    }).join('')}
+                </div>
+            </div>`;
+        });
+
+        listEl.innerHTML = html || '<p class="empty-msg">Aucun paramètre trouvé</p>';
+
+        listEl.querySelectorAll('.modal-list-item').forEach(el => {
+            el.addEventListener('click', (e) => {
+                if (e.target.tagName === 'INPUT') return;
+                toggleModalItem(el.dataset.id, modalData.params, 'modalPrList', 'modalPrCount', 'sélectionné(s)');
+            });
+            el.querySelector('input')?.addEventListener('change', () => {
+                toggleModalItem(el.dataset.id, modalData.params, 'modalPrList', 'modalPrCount', 'sélectionné(s)');
+            });
+        });
+
+        const countEl = document.getElementById('modalPrCount');
+        if (countEl) countEl.textContent = `${modalData.params.length} sélectionné(s)`;
+    }
+
+    // ─── Étape 5 : Planification + Récap ────────────────
+
+    function renderStepSchedule(container) {
+        const stNames = modalStationsCache
+            .filter(s => modalData.stations.includes(s.id))
+            .map(s => s.label);
+        const stText = stNames.length <= 3
+            ? stNames.join(', ')
+            : `${stNames.slice(0, 3).join(', ')} +${stNames.length - 3} autre(s)`;
+
+        const prText = modalData.params.length <= 5
+            ? modalData.params.join(', ')
+            : `${modalData.params.slice(0, 5).join(', ')} +${modalData.params.length - 5}`;
+
+        container.innerHTML = `
+            <div class="modal-step-content">
+                <div class="form-group">
+                    <label class="form-label"><i class="fas fa-clock"></i> Heure d'exécution quotidienne (GMT)</label>
+                    <div class="time-picker-group">
+                        <input type="number" id="taskHourInput" min="0" max="23" value="${modalData.hour}" class="time-input">
+                        <span class="time-sep">:</span>
+                        <input type="number" id="taskMinuteInput" min="0" max="59" value="${String(modalData.minute).padStart(2,'0')}" step="5" class="time-input">
+                        <span class="time-tz">GMT</span>
+                    </div>
+                    <small class="form-hint">La tâche s'exécutera chaque jour à cette heure</small>
+                </div>
+                <div class="task-recap-card">
+                    <h4><i class="fas fa-list-check"></i> Récapitulatif</h4>
+                    <div class="recap-grid">
+                        <div class="recap-row"><span class="recap-label">Nom</span><span class="recap-value">${_esc(modalData.name)}</span></div>
+                        <div class="recap-row"><span class="recap-label">Réseau</span><span class="recap-value">${modalData.station_type === 'pulsonic' ? '📡 Pulsonic' : '🔧 Campbell'}</span></div>
+                        <div class="recap-row"><span class="recap-label">Stations</span><span class="recap-value">${modalData.stations.length} — ${_esc(stText)}</span></div>
+                        <div class="recap-row"><span class="recap-label">Granularité</span><span class="recap-value">${GRAN_LABELS[modalData.granularity] || modalData.granularity}</span></div>
+                        <div class="recap-row"><span class="recap-label">Période</span><span class="recap-value">${modalData.period_days} jour(s) précédent(s)</span></div>
+                        <div class="recap-row"><span class="recap-label">Paramètres</span><span class="recap-value">${modalData.params.length} — ${_esc(prText)}</span></div>
+                    </div>
+                </div>
+            </div>`;
+
+        document.getElementById('taskHourInput').addEventListener('change', e => { modalData.hour = parseInt(e.target.value, 10) || 0; });
+        document.getElementById('taskMinuteInput').addEventListener('change', e => { modalData.minute = parseInt(e.target.value, 10) || 0; });
+    }
+
+    // ─── Soumission ─────────────────────────────────────
+
+    function submitTask() {
+        const hEl = document.getElementById('taskHourInput');
+        const mEl = document.getElementById('taskMinuteInput');
+        if (hEl) modalData.hour = parseInt(hEl.value, 10) || 0;
+        if (mEl) modalData.minute = parseInt(mEl.value, 10) || 0;
+
+        const nextBtn = document.getElementById('modalNextBtn');
+        nextBtn.disabled = true;
+        nextBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> En cours...';
+
+        const payload = { ...modalData };
+        const promise = editingTaskId
+            ? ApiClient.updateSchedulerTask(editingTaskId, payload)
+            : ApiClient.createSchedulerTask(payload);
+
+        promise
+            .then(res => {
+                showToast(res.message, 'success');
+                closeTaskModal();
+                loadTasks();
+            })
+            .catch(err => { showToast('Erreur : ' + err.message, 'error'); })
+            .finally(() => { nextBtn.disabled = false; renderModalStep(); });
+    }
+
 });

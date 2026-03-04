@@ -154,21 +154,22 @@
                     <div class="date-inputs">
                         <div class="form-group">
                             <label for="startDate">
-                                <i class="fas fa-calendar-alt"></i> Date de début
+                                <i class="fas fa-calendar-alt"></i> Date et heure de début
                             </label>
-                            <input type="text" id="startDate" class="form-input" placeholder="YYYY-MM-DD" readonly>
+                            <input type="text" id="startDate" class="form-input" placeholder="YYYY-MM-DD HH:MM" readonly>
                         </div>
                         
                         <div class="form-group">
                             <label for="endDate">
-                                <i class="fas fa-calendar-alt"></i> Date de fin
+                                <i class="fas fa-calendar-alt"></i> Date et heure de fin
                             </label>
-                            <input type="text" id="endDate" class="form-input" placeholder="YYYY-MM-DD" readonly>
+                            <input type="text" id="endDate" class="form-input" placeholder="YYYY-MM-DD HH:MM" readonly>
                         </div>
                     </div>
                     
                     <div class="quick-dates">
                         <span>Raccourcis :</span>
+                        <button class="btn-quick-date" data-period="0">Aujourd'hui</button>
                         <button class="btn-quick-date" data-period="7">7 derniers jours</button>
                         <button class="btn-quick-date" data-period="30">30 derniers jours</button>
                         <button class="btn-quick-date" data-period="90">3 derniers mois</button>
@@ -264,6 +265,55 @@
 
         </div>
     </main>
+
+    <!-- Section Planification multi-tâches -->
+    <section class="section scheduler-panel" id="schedulerSection">
+        <div class="container">
+            <div class="scheduler-header-bar">
+                <div class="scheduler-header-left">
+                    <i class="fas fa-calendar-check"></i>
+                    <div>
+                        <h3>Tâches planifiées</h3>
+                        <p class="scheduler-desc">Automatisez vos téléchargements quotidiens pour chaque réseau</p>
+                    </div>
+                </div>
+                <div class="scheduler-header-right">
+                    <span class="active-tasks-badge" id="activeTasksBadge">
+                        <i class="fas fa-bolt"></i>
+                        <span id="activeTasksCount">0</span> active(s)
+                    </span>
+                    <button id="addTaskBtn" class="btn btn-primary">
+                        <i class="fas fa-plus"></i> Nouvelle tâche
+                    </button>
+                </div>
+            </div>
+            <div class="task-list" id="taskList">
+                <!-- Rendu par JS -->
+            </div>
+        </div>
+    </section>
+
+    <!-- Modal Création / Édition de tâche -->
+    <div class="modal-overlay" id="taskModal">
+        <div class="modal-dialog">
+            <div class="modal-header">
+                <h3 id="modalTitle"><i class="fas fa-plus-circle"></i> Nouvelle tâche planifiée</h3>
+                <button class="modal-close-btn" id="modalCloseBtn"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="modal-stepper" id="modalStepper"></div>
+            <div class="modal-body" id="modalBody"></div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="modalPrevBtn" style="display:none;">
+                    <i class="fas fa-arrow-left"></i> Précédent
+                </button>
+                <div class="modal-footer-right">
+                    <button class="btn btn-primary" id="modalNextBtn">
+                        Suivant <i class="fas fa-arrow-right"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <!-- Footer -->
     <footer class="footer">
